@@ -27,7 +27,7 @@ type URL struct {
 	IsActive    bool       `json:"is_active" db:"is_active"`
 }
 
-func (u *URL) isExpired() bool {
+func (u *URL) IsExpired() bool {
 	if u.ExpiresAt == nil {
 		return false
 	}
