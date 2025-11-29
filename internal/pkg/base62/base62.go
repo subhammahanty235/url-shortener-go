@@ -36,6 +36,16 @@ func Encode(num uint64) string {
 	return reverse(result.String())
 }
 
+func EncodePadded(num uint64, minLength int) string {
+	encoded := Encode(num)
+	if len(encoded) >= minLength {
+		return encoded
+	}
+
+	padding := strings.Repeat(string(Alphabet[0]), minLength-len(encoded))
+	return padding + encoded
+}
+
 func Decode(str string) (uint64, error){
 	if len(str) == 0 {
 		return 0, errors.New("empty string")
