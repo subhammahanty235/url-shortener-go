@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"errors"
 	"time"
 )
@@ -49,10 +50,10 @@ type CreateURLResponse struct {
 	CreatedAt   time.Time  `json:"created_at"`
 }
 type URLStats struct {
-	ShortCode   string    `json:"short_code"`
-	ClickCount  int64     `json:"click_count"`
+	ShortCode   string     `json:"short_code"`
+	ClickCount  int64      `json:"click_count"`
 	LastClicked *time.Time `json:"last_clicked,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	CreatedAt   time.Time  `json:"created_at"`
 }
 
 type ClickEvent struct {
@@ -69,10 +70,24 @@ type ClickEvent struct {
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 }
 
-type UrlRepository interface {
+type URLRepository interface {
+	// Create stores a new URL mapping
+	Create(ctx context.Context, url *URL) error
 
+	// GetByShortCode retrieves a URL by its short code
+	GetByShortCode(ctx context.Context, shortCode string) (*URL, error)
 }
 
 type CacheRepository interface {
-	
+	// Get retrieves a URL from cache
+	Get(ctx context.Context, shortCode string) (*URL, error)
+
+	// Set stores a URL in cache with TTL
+	Set(ctx context.Context, url *URL, ttl time.Duration) error
+
+	// Delete removes a URL from cache
+	Delete(ctx context.Context, shortCode string) error
+
+	// Exists checks if a key exists in cache
+	Exists(ctx context.Context, shortCode string) (bool, error)
 }

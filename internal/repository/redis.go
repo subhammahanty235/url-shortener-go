@@ -15,23 +15,24 @@ const (
 	rateLimitCache = "rl:"
 )
 
-type RedisCacheRepository struct{
-	client *redis.Client
+type RedisCacheRepository struct {
+	client     *redis.Client
 	defaultTTL time.Duration
 }
-func NewRedisCacheRepository(client *redis.Client, defaultTTL time.Duration) *RedisCacheRepository{
+
+func NewRedisCacheRepository(client *redis.Client, defaultTTL time.Duration) *RedisCacheRepository {
 	return &RedisCacheRepository{
-		client: client,
+		client:     client,
 		defaultTTL: defaultTTL,
 	}
 }
 
-func (r *RedisCacheRepository) Get(ctx context.Context, shortCode string) (*domain.URL, error){
-	key := urlCachePrefix+shortCode
+func (r *RedisCacheRepository) Get(ctx context.Context, shortCode string) (*domain.URL, error) {
+	key := urlCachePrefix + shortCode
 
 	data, err := r.client.Get(ctx, key).Bytes()
 	if err != nil {
-		if errors.Is(err, redis.Nil){
+		if errors.Is(err, redis.Nil) {
 			return nil, nil
 		}
 
@@ -60,4 +61,16 @@ func (r *RedisCacheRepository) Set(ctx context.Context, url *domain.URL, ttl tim
 
 }
 
+func (r *RedisCacheRepository) Delete(ctx context.Context, shortCode string) error {
+	key := urlCachePrefix + shortCode
+	return r.client.Del(ctx, key).Err()
+}
 
+func (r *RedisCacheRepository) Exists(ctx context.Context, shortCode string) (bool, error) {
+	key := urlCachePrefix + shortCode
+	result, err := r.client.Exists(ctx, key).Result()
+	if err != nil {
+		return false, err
+	}
+	return result > 0, nil
+}
