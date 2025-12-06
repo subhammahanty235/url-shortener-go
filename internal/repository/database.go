@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"time"
-
+	_ "github.com/lib/pq"
 	"github.com/jmoiron/sqlx"
 	"github.com/subhammahanty235/url-shortener/internal/config"
 	"go.uber.org/zap"
