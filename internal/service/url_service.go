@@ -2,12 +2,12 @@ package service
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"time"
 
 	"github.com/subhammahanty235/url-shortener/internal/domain"
 	"github.com/subhammahanty235/url-shortener/internal/pkg/keygen"
+	"github.com/subhammahanty235/url-shortener/internal/pkg/metrics"
 	"go.uber.org/zap"
 )
 
@@ -16,6 +16,7 @@ type URLService struct {
 	cacheRepo   domain.CacheRepository
 	keyGen      *keygen.SnowFlakeGenerator
 	logger      *zap.Logger
+	metrics     *metrics.Metrics
 	baseURL     string
 	defaultTTL  time.Duration
 	maxTTL      time.Duration
@@ -36,6 +37,7 @@ func NewURLService(
 	cacheRepo domain.CacheRepository,
 	keyGen *keygen.SnowFlakeGenerator,
 	logger *zap.Logger,
+	m *metrics.Metrics,
 	cfg URLServiceConfig,
 ) *URLService {
 	if cfg.CacheTTL == 0 {
@@ -47,6 +49,7 @@ func NewURLService(
 		cacheRepo:   cacheRepo,
 		keyGen:      keyGen,
 		logger:      logger,
+		metrics:     m,
 		baseURL:     strings.TrimSuffix(cfg.BaseURL, "/"),
 		defaultTTL:  cfg.DefaultTTL,
 		maxTTL:      cfg.MaxTTL,
@@ -59,10 +62,12 @@ func (s *URLService) Create(ctx context.Context, req *domain.CreateURLRequest) (
 
 	var shortCode string
 	var err error
+	isCustomAlias := false
 
 	if req.CustomAlias != nil && *req.CustomAlias != "" {
 		shortCode = *req.CustomAlias
-		// TODO: check if the custom short coe already existsi
+		isCustomAlias = true
+		// TODO: check if the custom short code already exists
 	} else {
 		shortCode, err = s.keyGen.Generate()
 		if err != nil {
@@ -102,6 +107,15 @@ func (s *URLService) Create(ctx context.Context, req *domain.CreateURLRequest) (
 		return nil, err
 	}
 
+	// Track business metrics
+	// Learning: These metrics answer "how is our product being used?"
+	s.metrics.URLsCreatedTotal.Inc()
+	if isCustomAlias {
+		// Track custom alias usage separately
+		// Use case: Understand feature adoption - are users using custom aliases?
+		s.metrics.CustomAliasTotal.Inc()
+	}
+
 	s.logger.Info("URL created successfully", zap.String("short_code", shortCode), zap.String("original_url", req.OriginalURL))
 
 	return &domain.CreateURLResponse{
@@ -121,23 +135,37 @@ func (s *URLService) GetURL(ctx context.Context, shortCode string) (*domain.URL,
 	}
 
 	if url != nil {
+		// Cache hit!
 		s.logger.Debug("cache hit", zap.String("short_code", shortCode))
+
 		if url.IsExpired() {
 			_ = s.cacheRepo.Delete(ctx, shortCode)
-			return nil, errors.New("URL expired")
+			// Track expired URL attempts (important user experience metric)
+			s.metrics.ExpiredURLsTotal.Inc()
+			return nil, domain.ErrURLExpired
 		}
 
+		// Track redirect for cache hit
+		// Learning: Most redirects should be cache hits for good performance
+		s.metrics.URLRedirectsTotal.Inc()
 		return url, nil
 	}
 
+	// Cache miss - need to query database
 	s.logger.Debug("cache miss", zap.String("short_code", shortCode))
 	url, err = s.urlRepo.GetByShortCode(ctx, shortCode)
 	if err != nil {
 		return nil, err
 	}
+
+	// Try to cache for next time
 	if err := s.cacheRepo.Set(ctx, url, s.cacheTTL); err != nil {
 		s.logger.Warn("failed to cache URL", zap.Error(err))
 	}
+
+	// Track redirect for cache miss
+	// Learning: Cache misses are slower (hit DB), but still count as redirects
+	s.metrics.URLRedirectsTotal.Inc()
 
 	return url, nil
 }

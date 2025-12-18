@@ -114,6 +114,15 @@ services:
     profiles:
       - monitoring
 
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    ports:
+      - "9121:9121"
+    environment:
+      - REDIS_ADDR=redis:6379
+    networks:
+      - urlshortener
+      
   # Traefik (load balancer / reverse proxy)
   traefik:
     image: traefik:v3.0

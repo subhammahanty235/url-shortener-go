@@ -10,9 +10,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/subhammahanty235/url-shortener/internal/config"
 	"github.com/subhammahanty235/url-shortener/internal/handler"
+	"github.com/subhammahanty235/url-shortener/internal/middleware"
 	"github.com/subhammahanty235/url-shortener/internal/pkg/keygen"
+	"github.com/subhammahanty235/url-shortener/internal/pkg/metrics"
 	"github.com/subhammahanty235/url-shortener/internal/repository"
 	"github.com/subhammahanty235/url-shortener/internal/repository/cache"
 	"github.com/subhammahanty235/url-shortener/internal/service"
@@ -28,6 +31,11 @@ func main() {
 	if err != nil {
 		logger.Fatal("failed to load configuration", zap.Error(err))
 	}
+
+	// Initialize metrics
+	// Learning: Create metrics early so all components can use them
+	m := metrics.NewMetrics()
+	logger.Info("metrics initialized - Prometheus endpoint will be available at /metrics")
 
 	db, err := repository.NewPostgresConnection(cfg.Database, logger)
 	if err != nil {
@@ -52,14 +60,18 @@ func main() {
 		logger.Fatal("failed to initialize key generator", zap.Error(err))
 	}
 
-	urlRepo := repository.NewPostgresURLRepository(db)
-	cacheRepo := repository.NewRedisCacheRepository(redisClient, 24*time.Hour)
+	// Pass metrics to repositories
+	// Learning: Metrics flow from top (main.go) to bottom (repositories)
+	urlRepo := repository.NewPostgresURLRepository(db, m)
+	cacheRepo := repository.NewRedisCacheRepository(redisClient, 24*time.Hour, m)
 
+	// Pass metrics to service
 	urlService := service.NewURLService(
 		urlRepo,
 		cacheRepo,
 		keyGen,
 		logger,
+		m,
 		service.URLServiceConfig{
 			BaseURL:     cfg.Server.BaseURL,
 			DefaultTTL:  cfg.URL.DefaultTTL,
@@ -70,7 +82,7 @@ func main() {
 	)
 
 	urlHandler := handler.NewURLHandler(urlService, logger)
-	router := setupRouter(cfg, urlHandler, logger)
+	router := setupRouter(cfg, urlHandler, m, logger)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
@@ -117,6 +129,7 @@ func main() {
 func setupRouter(
 	cfg *config.Config,
 	urlHandler *handler.URLHandler,
+	m *metrics.Metrics,
 	logger *zap.Logger,
 ) *gin.Engine {
 	if cfg.Logging.Level == "debug" {
@@ -125,14 +138,28 @@ func setupRouter(
 		gin.SetMode(gin.ReleaseMode)
 	}
 	router := gin.New()
+
+	// Add middleware in the correct order
+	// Learning: Order matters! Recovery -> Logging -> Metrics -> Your handlers
+	router.Use(gin.Recovery()) // Panic recovery
+	router.Use(middleware.MetricsMiddleware(m)) // Metrics tracking
+
+	// Prometheus metrics endpoint
+	// Learning: This exposes metrics in Prometheus format for scraping
+	// Example: http://localhost:8080/metrics
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
+	// Health check endpoint (no metrics needed for this)
 	router.GET("/health", urlHandler.HealthCheck)
+
+	// URL shortener endpoints
 	redirectGroup := router.Group("/")
 	redirectGroup.GET("/:shortCode", urlHandler.RedirectURL)
+
 	api := router.Group("/api/v1")
 	api.POST("/shorten", urlHandler.CreateURL)
 
 	return router
-
 }
 
 func initLogger() *zap.Logger {
